@@ -6,41 +6,40 @@ from collections import Counter
 from itertools import combinations
 import networkx as nx
 import warnings
-
-#직무데이터분석
+import matplotlib.font_manager as fm  # <<< 수정: 폰트 관리를 위한 라이브러리 추가
 
 # 사소한 경고 메시지는 무시
 warnings.filterwarnings('ignore')
 
-# ---  시각화 위한 한글 폰트 설정 ---
-# 사용자 요청 및 오류 방지를 위해 폰트 설정 부분을 주석 처리합니다.
-# 그래프의 한글이 깨져 보일 수 있으나, 분석 자체에는 영향을 주지 않습니다.
-# try:
-#     font_path = None
-#     for font in fm.fontManager.ttflist:
-#         if 'Nanum' in font.name or 'Malgun' in font.name:
-#             font_path = font.get_file()
-#             break
-#     if font_path:
-#         font_prop = fm.FontProperties(fname=font_path)
-#         plt.rcParams['font.family'] = font_prop.get_name()
-#         print("✅ 한글 폰트가 설정되었습니다.")
-#     else:
-#         print("⚠️ 한글 폰트를 찾을 수 없습니다. 시각화 시 글자가 깨질 수 있습니다.")
-#     plt.rcParams['axes.unicode_minus'] = False
-# except Exception as e:
-#     print(f"폰트 설정 중 오류 발생: {e}")
+# --- 시각화 위한 한글 폰트 설정 ---
+# <<< 수정: 주석 해제 및 시스템 폰트 자동 탐색 로직으로 변경
+font_name = None
+try:
+    # 시스템에 설치된 폰트 중 'Malgun Gothic' 또는 'Nanum' 계열 폰트 탐색
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    if 'Malgun Gothic' in available_fonts:
+        font_name = 'Malgun Gothic'
+    elif any('Nanum' in font for font in available_fonts):
+        # 'Nanum'을 포함하는 폰트 중 하나를 선택
+        font_name = [font for font in available_fonts if 'Nanum' in font][0]
+
+    if font_name:
+        plt.rcParams['font.family'] = font_name
+        print(f"✅ 한글 폰트 '{font_name}'가 성공적으로 설정되었습니다.")
+    else:
+        print("⚠️ 'Malgun Gothic' 또는 'Nanum' 폰트를 찾을 수 없습니다. 시각화 시 글자가 깨질 수 있습니다.")
+
+    plt.rcParams['axes.unicode_minus'] = False  # 마이너스 부호 깨짐 방지
+except Exception as e:
+    print(f"폰트 설정 중 오류 발생: {e}")
 
 # ---  데이터 불러오기 및 전처리 ---
 file_path = 'job_code.csv'
 try:
-    # ⭐️ 핵심 수정 사항: 한글 CSV 파일이 깨질 때 'cp949' 인코딩을 지정하여 해결합니다.
     df = pd.read_csv(file_path, encoding='cp949')
-    print(f"\n '{file_path}' 파일을 성공적으로 불러왔습니다.")
+    print(f"\n'{file_path}' 파일을 성공적으로 불러왔습니다.")
 
-    # 'keywords_bert'가 비어있는 행은 분석할 수 없으므로 제거합니다
     df.dropna(subset=['keywords_bert'], inplace=True)
-    # 처리를 쉽게 하기 위해 키워드를 리스트 형태로 변환합니다
     df['keywords_list'] = df['keywords_bert'].str.split(', ')
 
     print("\n---------- [ 데이터 정보 ] ----------")
@@ -50,16 +49,15 @@ try:
 
 except FileNotFoundError:
     print(f" 오류: '{file_path}' 파일을 찾을 수 없습니다. 파일 위치를 확인해주세요.")
-    df = pd.DataFrame()  # 스크립트가 중단되지 않도록 빈 데이터프레임을 생성합니다
+    df = pd.DataFrame()
 except UnicodeDecodeError:
     print(f" 오류: '{file_path}' 파일의 인코딩 문제일 수 있습니다. 'utf-8'로 다시 시도합니다.")
     try:
         df = pd.read_csv(file_path, encoding='utf-8')
-        print(f"\n '{file_path}' 파일을 'utf-8'로 다시 시도하여 성공적으로 불러왔습니다.")
+        print(f"\n'{file_path}' 파일을 'utf-8'로 다시 시도하여 성공적으로 불러왔습니다.")
     except Exception as e:
         print(f" 오류: 파일 읽기에 최종적으로 실패했습니다. 원인: {e}")
         df = pd.DataFrame()
-
 
 # --- 메인 분석 블록 (데이터가 성공적으로 로드된 경우에만 실행) ---
 if not df.empty:
@@ -99,13 +97,16 @@ if not df.empty:
             '#독립적업무': ['순찰', '정리', '단순 포장', '보안']
         }
 
+
         def create_tags(keywords):
             tags = []
+            # keywords가 문자열이 아닌 경우(예: float 타입의 NaN)를 대비
             if not isinstance(keywords, str): return ''
             for tag, keyword_list in characteristic_dict.items():
                 if any(keyword in keywords for keyword in keyword_list):
                     tags.append(tag)
             return ', '.join(tags)
+
 
         df['job_tags'] = df['keywords_bert'].apply(create_tags)
         print("\n✨ 직무 태깅 결과 (샘플):")
@@ -120,6 +121,8 @@ if not df.empty:
     print(" 분석 3: 토픽 모델링을 통한 직무 군집화")
     print("=" * 50)
     try:
+        # 'keywords_bert'에 NaN 값이 있을 경우를 대비하여 문자열로 변환
+        df['keywords_bert'].fillna('', inplace=True)
         vectorizer = CountVectorizer()
         dtm = vectorizer.fit_transform(df['keywords_bert'])
         num_topics = 5
@@ -135,7 +138,7 @@ if not df.empty:
         print(f"분석 3 오류: {e}")
 
     # ==========================================================================
-    #  4: 작업 군집에 대한 네트워크 분석
+    #  분석 4: 작업 군집에 대한 네트워크 분석
     # ==========================================================================
     print("\n" + "=" * 50)
     print(" 분석 4: 작업 군집에 대한 네트워크 분석")
@@ -148,21 +151,29 @@ if not df.empty:
             pair_counts = Counter(keyword_pairs)
             print("\n🔗 가장 흔한 작업 쌍 (상위 10개):")
             print(pair_counts.most_common(10))
-       # 시각화 주석처리
-        #     G = nx.Graph()
-        #     for pair, count in pair_counts.most_common(30):
-        #         G.add_edge(pair[0], pair[1], weight=count)
-        #     if G.nodes():
-        #         plt.figure(figsize=(16, 12))
-        #         pos = nx.spring_layout(G, k=0.9, iterations=50)
-        #         d = dict(G.degree)
-        #         nx.draw(G, pos, with_labels=True, node_color='skyblue',
-        #                 node_size=[v * 100 for v in d.values()],
-        #                 font_size=12, edge_color='gray', alpha=0.8)
-        #         plt.title('작업 군집 네트워크 그래프', size=20)
-        #         plt.savefig('task_network.png')
-        #         print("\n✅ 네트워크 그래프가 'task_network.png'로 저장되었습니다.")
+
+            G = nx.Graph()
+            for pair, count in pair_counts.most_common(30):
+                G.add_edge(pair[0], pair[1], weight=count)
+
+            if G.nodes():
+                plt.figure(figsize=(16, 12))
+                pos = nx.spring_layout(G, k=0.9, iterations=50)
+                d = dict(G.degree)
+
+
+                nx.draw(G, pos, with_labels=True, node_color='skyblue',
+                        node_size=[v * 100 for v in d.values()],
+                        font_size=12, edge_color='gray', alpha=0.8,
+                        font_family=font_name)
+
+                plt.title('작업 군집 네트워크 그래프', size=20)
+                plt.savefig('task_network.png')
+                print("\n✅ 네트워크 그래프가 'task_network.png'로 저장되었습니다.")
+        else:
+            print("\n⚠️ 분석할 키워드 쌍이 없어 네트워크 그래프를 생성할 수 없습니다.")
+
     except Exception as e:
         print(f"분석 4 오류: {e}")
 
-print("\n 모든 분석이 완료.")
+print("\n모든 분석이 완료되었습니다.")
